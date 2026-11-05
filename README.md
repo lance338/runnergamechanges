@@ -6,7 +6,7 @@ Open `index.html` to play. The top view steps items down the screen in even jump
 
 `horizon-vs-screen-spawn.pdf` is the technical note for the two projections, written for a Flutter and Flame developer.
 
-`flame_depth.dart` is an earlier Flame sketch of the same idea. Its camera constants do not match this demo.
+`flame_depth.dart` is the Flame version of the two projections in the demo. Both sprites share one distance and one speed. Only the scale function differs.
 
 To run it locally with the images loading the same way as the page:
 

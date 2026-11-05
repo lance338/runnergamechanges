@@ -1,51 +1,68 @@
 import 'package:flame/components.dart';
 
-/// Shared depth for a forward-facing Flame runner.
+/// Flame reference for the playable demo in `index.html`.
 ///
-/// Every coin, hazard, dash, and roadside building uses one distance,
-/// measured in world units ahead of the player. [project] turns that
-/// distance into a screen point and a scale. The sky can stay a normal
-/// [SpriteComponent]. It does not share this distance.
+/// Both views share one distance and one clock. An item is spawned at
+/// [Depth.viewZ] and removed just past [Depth.playerZ]. The trip takes the
+/// same time either way. Only the function that turns that distance into a
+/// screen scale is different.
 ///
-/// Call [resize] from `FlameGame.onGameResize`.
+/// `z` is world units ahead of the camera. Larger `z` is farther up the road.
+/// The avatar stands at [Depth.playerZ], not at 0.
+///
+/// Call [Depth.resize] from `FlameGame.onGameResize`.
 class Depth {
-  static const double near = 780;
-  static const double runSpeed = 1500 / 5.8 * 2.6;
+  static const double near = 420;
+  static const double viewZ = 2300;
+  static const double playerZ = 90;
+  static const double runSpeed = 520;
 
-  static double centerX = 200;
-  static double horizonY = 180;
-  static double groundY = 640;
-  static double halfWidth = 160;
+  /// Full sprite height at scale 1. The demo draws coins at 99, bats at 203,
+  /// and suns at 240, then multiplies by the scale below.
+  static double centerX = 0;
+  static double horizonY = 0;
+  static double groundY = 0;
+  static double roadHalf = 0;
 
   static void resize(Vector2 size) {
     centerX = size.x / 2;
-    horizonY = size.y * 0.4;
+    horizonY = size.y * 0.28;
     groundY = size.y;
-    halfWidth = size.x * 0.52;
+    roadHalf = size.x * 0.52;
   }
 
-  static double scaleAt(double distance) => near / (near + distance);
+  /// Horizon spawn. Pixel speed is slow far away and fast beside the pin.
+  static double horizonScale(double z) => near / (near + z);
 
-  static Vector2 project(double laneOffset, double distance) {
-    final s = scaleAt(distance);
+  /// Screen spawn. Equal world steps are equal pixel steps.
+  /// `t` is 1 when the item reaches the avatar, so the hit and the picture match.
+  static double screenScale(double z) {
+    final farS = near / (near + viewZ);
+    final pinS = near / (near + playerZ);
+    final t = ((viewZ - z) / (viewZ - playerZ)).clamp(0.0, 1.08);
+    return farS + (pinS - farS) * t;
+  }
+
+  /// [lane] is a road coordinate, not pixels. The demo uses -0.64, 0, and 0.64.
+  static Vector2 place(double lane, double scale) {
     return Vector2(
-      centerX + laneOffset * s,
-      horizonY + (groundY - horizonY) * s,
+      centerX + lane * roadHalf * scale,
+      horizonY + (groundY - horizonY) * scale,
     );
   }
 }
 
-/// Goal sprite. [laneOffset] is the pixel offset from the road center
-/// when the sprite reaches the player (distance 0).
+/// Goal. Road dashes and roadside props use this same scale and the same
+/// moving distance. The sky stays a normal sprite and does not.
 ///
-/// [anchor] is [Anchor.bottomCenter], so the feet stay on the road point
-/// while [scale] changes. [SpriteComponent] defaults to [Anchor.topLeft];
-/// leaving that default makes a growing sprite slide down and off its lane.
-class DepthSprite extends SpriteComponent {
-  DepthSprite({
+/// [anchor] is [Anchor.bottomCenter], so the feet stay on the road point while
+/// the sprite grows. [SpriteComponent] defaults to [Anchor.topLeft], which
+/// slides a growing sprite off its lane.
+class HorizonSprite extends SpriteComponent {
+  HorizonSprite({
     required Sprite sprite,
     required Vector2 baseSize,
-    required this.laneOffset,
+    required this.lane,
     required this.distance,
   }) : super(
           sprite: sprite,
@@ -53,51 +70,52 @@ class DepthSprite extends SpriteComponent {
           anchor: Anchor.bottomCenter,
         );
 
-  /// Pixels from the road center at distance 0. Constant for the sprite's life.
-  final double laneOffset;
+  final double lane;
 
-  /// World units ahead of the player. Decreases by [Depth.runSpeed].
+  /// World units ahead of the camera. Decreases by [Depth.runSpeed].
   double distance;
 
   @override
   void update(double dt) {
     super.update(dt);
     distance -= Depth.runSpeed * dt;
-    final s = Depth.scaleAt(distance);
+    final s = Depth.horizonScale(distance);
     scale = Vector2.all(s);
-    position = Depth.project(laneOffset, distance);
-    // Nearer sprites draw above farther ones.
+    position = Depth.place(lane, s);
     priority = -distance.round();
-    if (distance < -40) removeFromParent();
+    if (distance < 8) removeFromParent();
   }
 }
 
-/// Current runner, kept here so the two updates can be compared.
+/// Comparison view. Keep the road on [HorizonSprite] with the camera held
+/// still. Only the item uses [Depth.screenScale].
 ///
-/// This steps a 0–1 screen progress by a constant amount each frame, then
-/// copies that progress into both Y and scale. Pixel speed never increases,
-/// so the sprite looks slower as it gets large, and the default top-left
-/// anchor makes it grow off the lane.
-class ScreenStepSprite extends SpriteComponent {
-  ScreenStepSprite({
+/// This subtracts the same [Depth.runSpeed] from the same distance as
+/// [HorizonSprite], so spawn-to-despawn time matches. An older sketch stepped
+/// a 0–1 screen timer on its own clock. That is not what the demo does.
+class ScreenSpawnSprite extends SpriteComponent {
+  ScreenSpawnSprite({
     required Sprite sprite,
     required Vector2 baseSize,
-    required this.laneOffset,
-  }) : super(sprite: sprite, size: baseSize);
+    required this.lane,
+    required this.distance,
+  }) : super(
+          sprite: sprite,
+          size: baseSize,
+          anchor: Anchor.bottomCenter,
+        );
 
-  final double laneOffset;
-  double screenT = 0;
+  final double lane;
+  double distance;
 
   @override
   void update(double dt) {
     super.update(dt);
-    screenT += dt / 5.8;
-    final t = screenT.clamp(0.0, 1.0);
-    scale = Vector2.all(t);
-    position = Vector2(
-      Depth.centerX + laneOffset * t,
-      Depth.horizonY + (Depth.groundY - Depth.horizonY) * t,
-    );
-    if (screenT > 1) removeFromParent();
+    distance -= Depth.runSpeed * dt;
+    final s = Depth.screenScale(distance);
+    scale = Vector2.all(s);
+    position = Depth.place(lane, s);
+    priority = -distance.round();
+    if (distance < 8) removeFromParent();
   }
 }
